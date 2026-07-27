@@ -1,0 +1,130 @@
+================================================================
+ ArcWallet — Initial State & Codebase Audit
+ Date: 2026-07-27
+ Source: ../arc-wallet/ (this repo)
+================================================================
+
+1. OVERVIEW
+-----------
+ArcWallet is an Expo 57 + React Native 0.86 mobile wallet application.
+Currently in its default Expo starter template state — NO arc-id
+integration has been implemented yet. This is a greenfield build.
+
+Tech stack: Expo 57, React Native 0.86, expo-router (file-based routing),
+react-native-reanimated 4.5, TypeScript 6.0, pnpm (hoisted linker).
+
+2. REPOSITORY LAYOUT
+---------------------
+arc-wallet/
+├── assets/
+│   ├── expo.icon/       # App icon assets
+│   └── images/          # Splash, logo, tab icons, tutorial images
+├── docs/                # Empty — planning docs go here
+├── scripts/
+│   └── reset-project.js # Expo starter reset script
+├── src/
+│   ├── app/             # expo-router pages (file-based routing)
+│   │   ├── _layout.tsx  # Root layout — ThemeProvider + AnimatedSplash + AppTabs
+│   │   ├── index.tsx    # Home screen — welcome splash, hints
+│   │   └── explore.tsx  # Explore screen — documentation links, collapsibles
+│   ├── components/      # Reusable UI components
+│   │   ├── animated-icon.tsx       # Splash animation + animated logo
+│   │   ├── animated-icon.web.tsx   # Web variant of splash
+│   │   ├── animated-icon.module.css
+│   │   ├── app-tabs.tsx            # Native tab navigation (iOS/Android)
+│   │   ├── app-tabs.web.tsx        # Web tab navigation
+│   │   ├── external-link.tsx       # In-app browser link opener
+│   │   ├── hint-row.tsx            # Hint display row for home screen
+│   │   ├── themed-text.tsx         # Themed text component (light/dark)
+│   │   ├── themed-view.tsx         # Themed view component (light/dark)
+│   │   ├── web-badge.tsx           # Web badge (Expo version display)
+│   │   └── ui/
+│   │       └── collapsible.tsx     # Animated collapsible section
+│   ├── constants/
+│   │   └── theme.ts    # Colors, fonts, spacing, layout constants
+│   ├── hooks/
+│   │   ├── use-color-scheme.ts     # Color scheme hook (native)
+│   │   ├── use-color-scheme.web.ts # Color scheme hook (web with hydration)
+│   │   └── use-theme.ts           # Returns Colors[scheme] for theme access
+│   ├── global.css      # CSS custom properties for web fonts
+├── package.json
+├── app.json            # Expo config (splash, icons, plugins)
+├── tsconfig.json       # Path aliases: @/ -> src/, @/assets/ -> assets/
+├── gen-snapshot.js     # Codebase snapshot generator
+├── pnpm-lock.yaml      # Dependencies locked
+├── .npmrc              # node-linker=hoisted
+└── .agent/             # Agent output files
+
+3. CURRENT SCREENS (app/)
+--------------------------
+src/app/_layout.tsx:
+  - Root layout for expo-router
+  - Wraps everything in ThemeProvider (DarkTheme / DefaultTheme)
+  - Shows AnimatedSplashOverlay then renders AppTabs
+
+src/app/index.tsx (Home):
+  - Hero section with AnimatedIcon + "Welcome to Expo" title
+  - HintRow for "edit index.tsx", "Dev tools", "Fresh start"
+  - Web badge with Expo version
+  - Uses SafeAreaView + themed components
+
+src/app/explore.tsx (Explore):
+  - Documentation links and learning resources
+  - Collapsible sections: file-based routing, cross-platform, images, dark mode, animations
+  - ExternalLink to Expo docs
+  - Uses SymbolView from expo-symbols
+
+4. COMPONENT INVENTORY
+-----------------------
+ThemedText           - Typography component with variants (default, title, subtitle, small, etc.)
+ThemedView           - View wrapper with theme-aware backgroundColor
+ThemedView types     - background, backgroundElement, backgroundSelected, text, textSecondary
+AnimatedIcon         - Reanimated keyframe animations for splash transition
+AnimatedSplashOverlay - Full-screen splash that fades out
+AppTabs              - NativeTabs (iOS/Android) or custom Tabs (web)
+Collapsible          - Animated expand/collapse with chevron
+ExternalLink         - In-app browser via expo-web-browser
+HintRow              - Row with title + code-snippet hint
+WebBadge             - Expo version badge (web only)
+
+5. THEME SYSTEM
+----------------
+Colors: light/dark palettes with background, backgroundElement, backgroundSelected, text, textSecondary
+Fonts: platform-selected system fonts (san-serif, mono, rounded, serif)
+Spacing: 2, 4, 8, 16, 24, 32, 64
+MaxContentWidth: 800
+BottomTabInset: platform-specific
+
+6. EXPO CONFIG (app.json)
+--------------------------
+- Scheme: arcwallet
+- Orientation: portrait
+- Android package: com.anonymous.arcwallet
+- Plugins: expo-router, expo-splash-screen
+- Experiments: typedRoutes, reactCompiler
+
+7. KEY DEPENDENCIES
+--------------------
+expo@^57.0.8, expo-router@~57.0.8, expo-splash-screen@^57.0.5,
+expo-status-bar@~57.0.1, expo-image@~57.0.1, expo-symbols@~57.0.1,
+expo-web-browser@~57.0.2, expo-device@~57.0.1, expo-font@~57.0.1,
+expo-linking@~57.0.4, expo-system-ui@~57.0.1, expo-haptics@n/a,
+@expo/ui@~57.0.7, expo-glass-effect@~57.0.1,
+react@19.2.3, react-dom@19.2.3, react-native@0.86.0,
+react-native-reanimated@4.5.0, react-native-gesture-handler@~2.32.0,
+react-native-safe-area-context@~5.7.0, react-native-screens@~4.26.0,
+react-native-web@~0.21.0, react-native-worklets@0.10.0
+
+8. CURRENT GAPS (vs wallet requirements)
+------------------------------------------
+- No authentication (login/register/logout)
+- No session management
+- No credential storage or display
+- No DID wallet functionality
+- No API client or SDK integration
+- No secure storage (no expo-secure-store)
+- No QR code scanning (no expo-camera or bar-code-scanner)
+- No network request layer
+- No state management beyond theme hooks
+- No navigation to wallet-specific screens
+- No biometric auth integration

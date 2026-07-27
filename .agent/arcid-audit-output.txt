@@ -1,0 +1,260 @@
+================================================================
+ ArcID — Full Architecture Audit
+ Date: 2026-07-27
+ Source: ../arc-id/
+================================================================
+
+1. OVERVIEW
+-----------
+ArcID is a sovereign multi-tenant identity and access management backend.
+Version 0.1.0 (pre-release). Monorepo with pnpm workspaces.
+Tech stack: Fastify + Prisma + Next.js 16 + PostgreSQL + Redis (Upstash).
+
+Backend is COMPLETE and SOLID — 57 test files / 352 tests passing.
+Frontend (Next.js dashboard) is partially rebuilt — SDK/hooks/stores done,
+pages still being cleaned up.
+
+2. REPOSITORY LAYOUT
+--------------------
+arc-id/
+├── src/
+│   ├── api/           # Fastify server — plugins, routes, server entrypoints
+│   │   ├── plugins/   # auth-guard, jwt, db, rate-limit, swagger, cors
+│   │   ├── routes/    # well-known, health, DID document, mail-preview
+│   │   └── server/    # build-server.ts, start-server.ts, start-workers.ts
+│   ├── app/           # Next.js 16 App Router — admin dashboard
+│   ├── modules/       # 9 domain modules (the core business logic)
+│   │   ├── auth/      # login, register, MFA, passkey, magic-link, sessions, social
+│   │   ├── oauth/     # authorize, token, revoke, introspect, clients, consent
+│   │   ├── credentials/  # DID, SD-JWT VC, issue/verify/revoke/offer, presentation
+│   │   ├── identity/  # profile, admin, delegation, external-ids, wallet-did
+│   │   ├── tenant/    # CRUD, policy, members, signing keys, onboarding
+│   │   ├── billing/   # subscription (Paystack/Stripe)
+│   │   ├── audit/     # audit log write + query
+│   │   ├── idp/       # SAML2 + OIDC federation
+│   │   └── webhooks/  # endpoint config + delivery
+│   ├── sdk/           # 10 typed SDK modules (factory pattern, no framework deps)
+│   ├── store/         # Zustand stores (auth, tenant, ui)
+│   ├── hooks/         # React hooks (15 hooks)
+│   ├── providers/     # Auth provider + theme provider
+│   ├── core/          # Config, DB, errors, mail engine, flows framework
+│   ├── lib/           # JWT, KMS, security (RBAC, JTI, JWS-proof), webhooks
+│   └── types/         # Shared TypeScript types
+├── prisma/
+│   ├── schema.prisma  # 50+ models — single source of truth
+│   └── migrations/    # Never hand-edit
+├── docs/planning/     # Roadmap + testing guide
+└── .github/workflows/ # CI + deploy pipelines
+
+3. MODULE BREAKDOWN & WALLET-RELEVANT API
+------------------------------------------
+
+3a. SDK LAYER (src/sdk/) — What ArcWallet Would Consume
+
+The SDK is a factory-pattern pure fetch wrapper with zero framework deps.
+It's designed to be extracted as a standalone npm package.
+
+Files:
+  client.ts         — Core HTTP client with 401 auto-refresh, typed ApiResponse<T>
+  index.ts          — Factory singleton wiring (auth, credentials, identity, etc.)
+  auth.sdk.ts       — login, register, logout, me, refresh, sessions, MFA, passkey, step-up
+  credentials.sdk.ts — list, verify, issue, offer, revoke credentials
+  identity.sdk.ts   — list/get identities, suspend, reinstate
+  passkey.sdk.ts    — WebAuthn passkey CRUD + registration/authentication options
+  oauth.sdk.ts      — OAuth clients + tokens
+  tenant.sdk.ts     — tenant CRUD + switch-context
+  billing.sdk.ts    — get subscription
+  audit.sdk.ts      — list audit logs
+  webhooks.sdk.ts   — webhook endpoint CRUD + test
+
+3b. WALLET-SPECIFIC ENDPOINTS (Already Built)
+
+1. register-wallet-did.flow.ts — Identity-owned did:key registration
+   - POST /identity/wallet/did
+   - Input: publicKeyJwk (JWK), provider, providerWalletId
+   - Output: did, didDocument, walletId, keyType
+   - Flow: ArcWallet generates keypair on-device → sends only public key → ArcID encodes
+     as did:key, builds DID document, creates DecentralizedIdentifier + Wallet rows in 1 tx
+   - Non-custodial by design: private keys never touch ArcID
+
+2. Credential Offers (offer-credential.flow.ts)
+   - POST /credentials/offers
+   - Tenant creates offer → subject accepts → receives credential
+
+3. Presentation Endpoint
+   - POST /verify/session — create challenge
+   - POST /verify/present — JWS-signed proof + credential presentation
+   - Anti-replay: single-use sessions, 5-min TTL
+
+4. Wallet model (Prisma)
+   - Fields: id, identityId, provider, providerWalletId, createdAt
+   - Unique constraint: [provider, providerWalletId]
+   - Indexed by identityId
+
+3c. PRISMA MODELS RELEVANT TO ARC-WALLET
+
+Identity          — Core user record (primaryEmail, name, status, etc.)
+DecentralizedIdentifier — did:key records owned by identity or tenant
+Wallet            — Wallet binding (provider + providerWalletId)
+VerifiableCredential — W3C VCs held by identity
+CredentialOffer   — Pending offers for credential issuance
+VerifySession     — Presentation verification challenge sessions
+Session           — Auth sessions with AAL levels
+Passkey           — WebAuthn passkeys
+Device            — Known devices
+Mfa               — TOTP/email/SMS MFA settings
+ExternalIdentifier — Self-reported linked identifiers (phone, NIN, BVN, etc.)
+
+4. API SURFACE — ALL ENDPOINTS (for client consumption)
+--------------------------------------------------------
+
+Auth:
+  POST /api/v1/auth/login
+  POST /api/v1/auth/register
+  POST /api/v1/auth/logout
+  POST /api/v1/auth/password/reset
+  POST /api/v1/auth/password/reset/confirm
+  POST /api/v1/auth/email/verify
+  POST /api/v1/auth/mfa/setup
+  POST /api/v1/auth/mfa/confirm
+  DELETE /api/v1/auth/mfa/disable
+  POST /api/v1/auth/mfa/verify
+  POST /api/v1/auth/passkey/options/register
+  POST /api/v1/auth/passkey/register
+  POST /api/v1/auth/passkey/options/authenticate
+  POST /api/v1/auth/passkey/authenticate
+  GET  /api/v1/auth/passkey
+  DELETE /api/v1/auth/passkey/:id
+  GET  /api/v1/auth/sessions
+  DELETE /api/v1/auth/sessions/:id
+  POST /api/v1/auth/magic-link
+  POST /api/v1/auth/step-up
+  POST /api/v1/auth/switch-context
+  POST /api/v1/auth/username (setUsername)
+
+Identity:
+  GET  /api/v1/identity/profile
+  PATCH /api/v1/identity/profile (update-profile)
+  DELETE /api/v1/identity/account (delete-account)
+  GET  /api/v1/identity/external-ids
+  POST /api/v1/identity/external-ids/link
+  POST /api/v1/identity/external-ids/unlink
+  POST /api/v1/identity/wallet/did (register-wallet-did)
+  GET  /api/v1/identity/devices
+  DELETE /api/v1/identity/devices/:id
+
+Credentials:
+  POST /api/v1/credentials/issue
+  POST /api/v1/credentials/verify
+  POST /api/v1/credentials/offers (create offer)
+  POST /api/v1/credentials/offers/:token/accept
+  POST /api/v1/credentials/revoke
+  GET  /api/v1/credentials/:id/status
+  POST /api/v1/verify/session
+  POST /api/v1/verify/present
+
+OAuth:
+  GET  /api/v1/oauth/clients
+  POST /api/v1/oauth/clients
+  DELETE /api/v1/oauth/clients/:id
+  GET  /api/v1/oauth/tokens
+  DELETE /api/v1/oauth/tokens/:id
+  GET  /api/v1/oauth/consent
+  POST /api/v1/oauth/authorize
+  POST /api/v1/oauth/token
+  POST /api/v1/oauth/revoke
+  POST /api/v1/oauth/introspect
+  GET  /api/v1/oauth/jwks
+  GET  /api/v1/oauth/userinfo
+
+Tenant:
+  POST /api/v1/tenants
+  GET  /api/v1/tenants/:slug
+  GET  /api/v1/tenants/:slug/policy
+  GET  /api/v1/tenants/:slug/members
+  POST /api/v1/tenants/:slug/members
+  DELETE /api/v1/tenants/:slug/members/:id
+  POST /api/v1/tenants/:slug/signing-keys
+  POST /api/v1/tenants/:slug/did
+  GET  /api/v1/tenants/:slug/projects
+  POST /api/v1/tenants/:slug/projects
+  POST /api/v1/tenants/:slug/onboarding/projects/:projectId/start
+  POST /api/v1/tenants/:slug/invite/:token/accept
+
+Admin:
+  GET  /api/v1/identity/admin
+  POST /api/v1/identity/admin/:id/suspend
+  PATCH /api/v1/identity/:id/status
+
+Billing:
+  GET  /api/v1/billing/subscription
+
+Webhooks:
+  GET  /api/v1/webhooks/endpoints
+  POST /api/v1/webhooks/endpoints
+  PATCH /api/v1/webhooks/endpoints/:id
+  DELETE /api/v1/webhooks/endpoints/:id
+  POST /api/v1/webhooks/endpoints/:id/test
+
+Audit:
+  GET  /api/v1/audit/logs
+
+5. RELEVANT FLOWS FOR ARC-WALLET (src/modules/)
+-----------------------------------------------
+identity/flows/register-wallet-did.flow.ts     — Register wallet DID
+credentials/flows/issue-credential.flow.ts      — Issue SD-JWT VC
+credentials/flows/offer-credential.flow.ts      — Create credential offer
+credentials/flows/verify-credential.flow.ts     — Verify SD-JWT VC
+credentials/flows/revoke-credential.flow.ts     — Revoke credential
+oauth/flows/token-exchange.flow.ts              — OAuth token exchange
+oauth/flows/token-refresh.flow.ts               — Refresh token rotation
+
+6. ARC-ID DEPLOYMENT READINESS ASSESSMENT
+------------------------------------------
+
+✅ STRENGTHS:
+- Backend fully functional with 352 passing tests
+- All Phase 0-2 items complete (bug fixes, OAuth gaps, wallet-facing API)
+- SDK layer is framework-agnostic and extractable as npm package
+- CORS configured (not wildcard)
+- SSRF defense in place (assertSafeUrl + fetchWithSsrfGuard)
+- CSRF reviewed and clean
+- CI pipeline working (lint → typecheck → test → build)
+- Postgres + Redis architecture
+
+⚠️ BEFORE PRODUCTION:
+- No Dockerfile or docker-compose.yml for deployment
+- No production Dockerfile in repo
+- No secrets scanning in CI
+- Redis-backed distributed revocation not done (Postgres-only today)
+- No correlation IDs / observability (Phase 4 not started)
+- Integration tests against real Postgres don't exist (all mock-based)
+- Migration rollback testing not done
+
+RECOMMENDATION: Deploy arc-id API as a staging instance NOW for wallet dev.
+Production ship needs: Dockerfile + docker-compose + secrets scanning in CI.
+The API surface is stable enough for wallet development.
+
+7. INTEGRATION STRATEGY
+-----------------------
+
+OPTION A (RECOMMENDED): Consume arc-id via its HTTP API + SDK
+  - ArcWallet uses the fetch-based SDK client directly
+  - No tight coupling — arc-id is a standalone service
+  - ArcWallet ships with its own copy of the SDK or depends on @arcid/sdk npm package
+  - Authentication: OAuth 2.0 authorization code + PKCE flow
+  - Credential operations: REST API calls to arc-id
+  - DID management: keypair generated on-device, only public key sent to arc-id
+  - This is the designed architecture — arc-id never custodies wallet private keys
+
+OPTION B: Embed SDK as local package
+  - Copy/fork the SDK into arc-wallet's codebase
+  - Useful if we need to modify SDK behavior per-wallet
+  - Risk of drift from arc-id's SDK
+
+RECOMMENDATION: Start with Option A — consume arc-id staging instance via HTTP.
+The SDK client.ts is 80 lines and has zero framework deps. Perfect for RN.
+
+================================================================
+END OF AUDIT
+================================================================

@@ -1,0 +1,161 @@
+================================================================
+ ArcID — Deployment Readiness Assessment for ArcWallet Integration
+ Date: 2026-07-27
+ Source: ../arc-id/ (full codebase analysis)
+================================================================
+
+1. DEPLOYMENT READINESS SUMMARY
+--------------------------------
+ArcID is backend-complete (0.1.0) with 352 tests passing, but has gaps
+that prevent production deployment without additional work.
+
+Verification: PASS (57/57 test files, 352/352 tests)
+Typecheck: PASS (tsc --noEmit clean)
+CI: PASS (3 workflows: ci.yml, deploy-api.yml, deploy-web.yml)
+
+2. READY FOR PRODUCTION — ✅
+--------------------------------
+- OAuth 2.0 / OIDC provider — full authorize, token, refresh, revoke, introspect
+- WebAuthn passkeys (registration + authentication)
+- TOTP MFA setup/verify/recovery + step-up authentication
+- Magic-link authentication
+- Social login (Google, GitHub, Apple, Microsoft)
+- SAML2 + OIDC federation
+- SD-JWT Verifiable Credentials issue/verify/revoke with BitstringStatusList
+- Presentation endpoint (challenge-response verification protocol)
+- Multi-tenant CRUD with TenantPolicy enforcement (5 fields)
+- RBAC with 16 permissions and requirePermission() guard
+- Webhook delivery engine (Postgres queue, retry/backoff, dead-letter)
+- Rate limiting per route (all auth-sensitive routes configured)
+- JTI blocklist (Redis two-tier + DB fallback)
+- KMS encryption for signing keys (AES-256-GCM)
+- SSRF defense (assertSafeUrl with network-layer private-IP blocking)
+- CORS restricted to configured origins
+- CSRF protection (cookie sameSite lax + httpOnly + secure)
+- Email via Resend (13 templates)
+- SMS via Brevo (MFA codes + security alerts)
+- Audit logging (40+ actions)
+- CI pipeline (lint → typecheck → test → build)
+
+3. NEEDED BEFORE PRODUCTION — ⚠️
+-----------------------------------
+P0 — Docker Compose for local dev:
+  - No docker-compose.yml exists
+  - Local development requires manual Postgres + Redis setup
+  - Blocking for wallet developers who need to run arc-id locally
+  - Fix: create docker-compose.yml with Postgres 16 + Redis 7
+
+P0 — Missing endpoint for wallet credential listing:
+  - GET /credentials returns 404 (not implemented)
+  - Wallet cannot display user's credentials
+  - Fix: implement GET /credentials in credentials module
+
+P1 — Dockerfile for production:
+  - No Dockerfile exists
+  - deploy-api.yml deploys directly (no containerization)
+  - Fix: multi-stage Dockerfile for Fastify API
+
+P1 — Migration rollback testing:
+  - No prisma:migrate-down or rollback testing
+  - Risk: production migration failures are irreversible
+  - Fix: add rollback testing to CI
+
+P2 — Secrets/PII scanning:
+  - No automated scan for plaintext credentials in log statements
+  - No dependency scanning (trivy/snyk) in CI
+  - Fix: add secret scanning + dependency scanning to CI
+
+P2 — Integration tests against real Postgres:
+  - All tests use mock DB (createMockDb)
+  - No real-database integration tests
+  - Risk: mock/real divergences in production
+  - Fix: add integration test suite with testcontainers
+
+P2 — Observability:
+  - Zero tracing exists today
+  - No P95/error-rate metrics on auth/token paths
+  - No structured logging beyond Pino defaults
+  - Fix: add OpenTelemetry instrumentation, request correlation IDs
+
+P3 — Frontend still being rebuilt:
+  - SDK/stores/hooks/providers complete
+  - Admin dashboard pages in progress
+  - Not a blocker for wallet (wallet uses API, not admin dashboard)
+
+4. DEPLOYMENT ARCHITECTURE RECOMMENDATION
+------------------------------------------
+For wallet development, I recommend:
+
+Option A: Local Development (start here)
+  - Run arc-id locally (pnpm dev:all)
+  - Postgres + Redis via manual install or Docker
+  - Wallet connects to localhost:4000/api/v1
+  - Pros: Fast iteration, no cost, full control
+  - Cons: Requires manual infra setup
+
+Option B: Deploy arc-id as a shared dev instance
+  - Deploy Fastify API to a PaaS (Railway, Fly.io, Render)
+  - Managed Postgres + Redis (Upstash)
+  - Configure CORS for wallet dev URLs
+  - Set up CI/CD from main branch
+  - Pros: Team can share one backend, closer to production
+  - Cons: Ongoing cost, deployment maintenance
+
+Option C: Production deployment (when ready)
+  - Containerize with Docker
+  - Deploy to Kubernetes or PaaS
+  - Managed Postgres (RDS, Cloud SQL, Supabase)
+  - Managed Redis (Upstash, ElastiCache)
+  - Add Dockerfile + health checks + monitoring
+  - Enable Phase 3+4 hardening first
+
+5. RECOMMENDED PATH FOR WALLET TEAM
+-------------------------------------
+I recommend B + A hybrid:
+
+Step 1 — THIS WEEK: Set up arc-id locally
+  - Create docker-compose.yml (Postgres 16 + Redis 7)
+  - Run pnpm prisma:migrate + pnpm seed
+  - Verify arc-id API works (pnpm dev:api)
+  - Wallet connects to http://localhost:4000/api/v1
+
+Step 2 — NEXT: Implement GET /credentials in arc-id
+  - Required before wallet can display credentials
+  - Simple: query Credential table by identityId
+
+Step 3 — AFTER AUTH WORKS: Deploy shared dev instance
+  - Deploy Fastify API to Railway or Fly.io
+  - Set up managed Postgres (Supabase free tier works)
+  - Set up Redis (Upstash free tier)
+  - Wallet connects to dev API URL
+  - Iterate on wallet features against real backend
+
+Step 4 — PRODUCTION: Complete hardening + Dockerize
+  - Add Dockerfile, docker-compose for prod
+  - Add observability (OpenTelemetry)
+  - Integration tests with real DB
+  - Secret scanning in CI
+  - Then deploy for real users
+
+6. COST ESTIMATE (shared dev instance)
+---------------------------------------
+- Railway/Fly.io Fastify: ~$5-15/mo
+- Supabase Postgres: Free tier (500MB, 5 users)
+- Upstash Redis: Free tier (10MB, 1000 commands/day)
+- Resend email: Free tier (100 emails/day)
+= ~$5-15/mo for a shared dev instance
+
+7. ENV VARIABLES NEEDED FOR DEPLOYMENT
+-----------------------------------------
+DATABASE_URL=postgresql://...
+REDIS_URL=rediss://...
+JWT_SECRET=<generated>
+ENCRYPTION_KEY=<generated via KMS script>
+RESEND_API_KEY=re_...
+BREVO_API_KEY=...
+BREVO_SMS_SENDER=ArcID
+NEXT_PUBLIC_API_URL=https://api.arcid.dev/api/v1
+ALLOWED_ORIGINS=https://wallet.arcid.dev,http://localhost:8081
+SMTP_FROM=noreply@arcid.dev
+SMTP_NAME=ArcID
+BASE_URL=https://api.arcid.dev

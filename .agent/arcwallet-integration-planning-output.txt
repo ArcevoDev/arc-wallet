@@ -1,0 +1,331 @@
+================================================================
+ ArcWallet × ArcID — Integration Planning Document
+ Date: 2026-07-27
+ Source: ../arc-wallet/ + ../arc-id/
+================================================================
+
+1. ARC-ID ARCHITECTURE SUMMARY (for wallet consumption)
+--------------------------------------------------------
+ArcID is a sovereign multi-tenant IAM backend:
+- Fastify API server on port 4000
+- Next.js 16 admin dashboard on port 3000
+- PostgreSQL + Redis (Upstash)
+- 57 test files / 352 tests — all passing
+
+Key modules for wallet consumption:
+  ├── auth/        — login, register, MFA, passkey, magic-link, sessions, social
+  ├── oauth/       — authorize, token, revoke, introspect, clients, consent
+  ├── credentials/ — DID, SD-JWT VC, issue/verify/revoke/offer, presentation
+  ├── identity/    — profile, delegation, external-ids, wallet-did
+  ├── tenant/      — CRUD, policy, members, signing keys, onboarding flows
+  └── webhooks/    — endpoint config + delivery events
+
+2. ARC-ID SDK (what the wallet consumes)
+------------------------------------------
+ArcID has a factory-pattern SDK at src/sdk/ with typed clients:
+
+  SDK Client (client.ts):
+    - Pure fetch wrapper, no framework deps
+    - Auto 401 → refresh token → retry
+    - Response format: { data: T | null, error: ApiError | null }
+    - Methods: get, post, put, patch, delete
+
+  Domain SDKs:
+    auth.sdk.ts:
+      login(email, password)            → POST /auth/login
+      register(name, email, password)   → POST /auth/register
+      logout()                          → POST /auth/logout
+      me()                              → GET /identity/profile
+      refresh(refreshToken)             → POST /oauth/token
+      listSessions()                    → GET /auth/sessions
+      revokeSession(id)                 → DELETE /auth/sessions/:id
+      forgotPassword(email)             → POST /auth/password/reset
+      resetPassword(token, pwd)         → POST /auth/password/reset/confirm
+      verifyEmail(token)                → POST /auth/email/verify
+      verifyMfa(code, sessionId)        → POST /auth/mfa/verify
+      setupMfa()                        → POST /auth/mfa/setup
+      confirmMfa(code)                  → POST /auth/mfa/confirm
+      disableMfa()                      → DELETE /auth/mfa/disable
+      stepUp(method, sessionId, cred)   → POST /auth/step-up
+
+    passkey.sdk.ts:
+      list()                            → GET /auth/passkey
+      registrationOptions({name})       → POST /auth/passkey/options/register
+      register(data)                    → POST /auth/passkey/register
+      authenticationOptions(sessionId)  → POST /auth/passkey/options/authenticate
+      authenticate(data)                → POST /auth/passkey/authenticate
+      deregister(passkeyId)             → DELETE /auth/passkey/:passkeyId
+
+    credentials.sdk.ts:
+      list()                            → GET /credentials (⚠️ 404 — not implemented yet)
+      verify(credential)                → POST /credentials/verify
+      issue(data)                       → POST /credentials/issue
+      offer(data)                       → POST /credentials/offers
+      revoke(credentialId)              → POST /credentials/revoke
+
+    identity.sdk.ts:
+      list(params?)                     → GET /identity/admin
+      get(id)                           → GET /identity/:id (⚠️ 404 — not implemented)
+      suspend(id, reason)               → POST /identity/admin/:id/suspend
+      reinstate(id, reason)             → PATCH /identity/:id/status
+
+    oauth.sdk.ts:
+      listClients()                     → GET /oauth/clients
+      createClient(data)                → POST /oauth/clients
+      deleteClient(id)                  → DELETE /oauth/clients/:id
+      listTokens()                      → GET /oauth/tokens
+      revokeToken(tokenId)              → DELETE /oauth/tokens/:id
+
+    tenant.sdk.ts:
+      list()                            → GET /tenants (⚠️ 404 — not implemented)
+      get(slug)                         → GET /tenants/:slug
+      create({name, slug})              → POST /tenants
+      switchTenant(tenantId)            → POST /auth/switch-context
+
+    billing.sdk.ts:
+      getSubscription()                 → GET /billing/subscription
+
+    webhooks.sdk.ts:
+      list()                            → GET /webhooks/endpoints
+      create({url, events})             → POST /webhooks/endpoints
+      update(id, data)                  → PATCH /webhooks/endpoints/:id
+      delete(id)                        → DELETE /webhooks/endpoints/:id
+      test(id)                          → POST /webhooks/endpoints/:id/test
+
+    audit.sdk.ts:
+      list(params?)                     → GET /audit/logs
+
+  NOT YET IN SDK (backend exists, wallet needs to create the client):
+    onboarding (backend routes exist, no SDK wrapper yet):
+      start(flowId)                     → POST /identity/onboarding/start
+      getProgress(progressId)           → GET /identity/onboarding/:progressId
+      advance(progressId, stepId, data) → POST /identity/onboarding/:progressId/advance
+
+3. ONBOARDING SYSTEM (ArcID-built, wallet-consumed)
+------------------------------------------------------
+ArcID already has a complete onboarding architecture — the wallet doesn't
+need to reimplement tracking logic, only render the frontend steps.
+
+Backend ownership (what ArcID manages):
+  - OnboardingFlow model — belongs to a Project, stores ordered steps as JSON
+  - OnboardingProgress model — tracks identity's position: currentStep,
+    completedSteps[], completedAt, arbitrary collected data
+  - Admin CRUD routes for defining flows per project
+  - User-facing routes for start/advance/get progress
+  - Idempotent start — calling start() twice returns same progress row
+  - Steps are loose JSON schema — frontend decides rendering per step type
+  - completedAt auto-sets when all steps in the flow are done
+
+Wallet ownership (what the wallet builds):
+  - services/onboarding.ts — SDK wrapper for the 3 user-facing routes
+  - app/(app)/onboarding/ — onboarding screen group with step renderers
+  - components/onboarding/ — step-type renderers (info cards, forms, actions)
+  - stores/onboarding-store.ts — optional, tracks which flows user has seen
+  - Flow trigger — show onboarding on first launch or when new flows exist
+  - Possible step types: WelcomeCard, FeatureHighlight, ActionPrompt,
+    FormStep, QRCodeTutorial, BiometricSetup, CredentialIntro
+
+Why this matters:
+  - No backend work needed — ArcID fully owns flow definitions + progress
+  - Wallet admins define flows per project via admin dashboard
+  - Wallet just calls start → render steps → advance per step
+  - User can resume mid-flow if they close the app
+
+4. AUTH STORE (arc-id src/store/auth.store.ts)
+------------------------------------------------
+Zustand store — singleton pattern:
+  State:
+    user: { id, email, name, emailVerified, aal } | null
+    accessToken: string | null
+    refreshToken: string | null
+    isAuthenticated: boolean
+    isLoading: boolean
+
+  Actions:
+    setAuth(user, accessToken, refreshToken)
+    setUser(user)
+    setTokens(accessToken, refreshToken?)
+    clearAuth()
+    setLoading(boolean)
+
+  SDK integration:
+    - getAccessToken() reads from useAuthStore.getState().accessToken
+    - refreshToken() calls POST /oauth/token with refresh_token grant
+    - onAuthCleared() calls clearAuth + localStorage.removeItem
+
+4. WHAT ARC-WALLET NEEDS TO BUILD
+-----------------------------------
+PHASE 1 — Auth & SDK Foundation (wallet must authenticate)
+  - Install additional deps:
+    - zustand (state management — already used by arc-id)
+    - expo-secure-store (token storage, keychain)
+    - expo-camera (QR scanning for credentials/presentation)
+  - Create types/ directory mirroring arc-id SDK types
+  - Create services/ directory:
+    - services/api-client.ts — port arc-id SDK client.ts (pure fetch, 401 refresh, typed responses)
+    - services/auth.ts — auth SDK integration (login, register, logout, me, sessions)
+    - services/passkey.ts — passkey registration/authentication
+    - services/onboarding.ts — NEW: SDK wrapper for ArcID's 3 onboarding routes
+    - services/credentials.ts — credential SDK integration
+  - Create stores/ directory:
+    - stores/auth-store.ts — Zustand store (port arc-id auth.store.ts)
+    - stores/onboarding-store.ts — optional, tracks local onboarding completion state
+  - Create auth screens:
+    - app/(auth)/login.tsx — login form → calls auth SDK
+    - app/(auth)/register.tsx — registration form
+    - app/(auth)/mfa-verify.tsx — TOTP verification during login
+    - app/(auth)/passkey.tsx — passkey auth flow
+    - app/(auth)/forgot-password.tsx
+  - Create route group (auth) with unauthenticated layout
+  - Implement token persistence via expo-secure-store
+  - Auto-login on app launch from stored tokens
+  - BUILD ONBOARDING FLOW:
+    - app/(app)/onboarding/ — route group for onboarding screens
+    - app/(app)/onboarding/_layout.tsx — stepper layout with progress indicator
+    - app/(app)/onboarding/welcome.tsx — welcome card, app overview
+    - app/(app)/onboarding/features.tsx — feature highlights (credentials, DID, security)
+    - app/(app)/onboarding/biometric.tsx — biometric/passkey setup prompt
+    - app/(app)/onboarding/credential-intro.tsx — what are VCs, how they work
+    - app/(app)/onboarding/complete.tsx — completion screen → enter wallet
+    - components/onboarding/ — step renderers (StepCard, ProgressDots, SkipButton)
+    - Logic: after register or first launch → check onboarding progress →
+      show onboarding if no completed flow → advance per step
+
+PHASE 2 — Wallet Core (credential management)
+  - Create wallet screens:
+    - app/(app)/index.tsx — wallet dashboard (credentials list, balance, DID display)
+    - app/(app)/credentials/ — credential management screens
+    - app/(app)/credentials/issue.tsx — accept issued credentials
+    - app/(app)/credentials/detail.tsx — view credential details
+    - app/(app)/credentials/verify.tsx — verification presentation
+    - app/(app)/did/ — DID management
+    - app/(app)/settings/ — profile, MFA, security settings
+  - Create components/wallet/:
+    - components/wallet/credential-card.tsx
+    - components/wallet/did-badge.tsx
+    - components/wallet/qr-scanner.tsx
+  - Create services/credential-service.ts
+  - Credential offer polling or push notification handling
+  - SD-JWT VC display and verification
+
+PHASE 3 — DID & Identity
+  - Register wallet DID on first launch (POST /identity/wallet-did)
+  - Display did:key or did:web
+  - DID document retrieval and presentation
+  - DID-to-identity resolution for peer verification
+
+PHASE 4 — Full Integration
+  - Tenant context switching (if multi-tenant)
+  - OAuth client management for the wallet
+  - Webhook subscription management
+  - Audit log query
+  - Billing/subscription display
+
+5. ARCHITECTURE DECISIONS
+--------------------------
+a) SDK Portability:
+   The arc-id SDK is pure TypeScript (no React/Next.js deps) — the entire
+   client.ts + domain SDKs can be copied directly into the wallet with
+   minimal changes (BASE_URL config, token storage adapters).
+
+b) Token Storage:
+   - Use expo-secure-store for access/refresh tokens (keychain on iOS,
+     EncryptedSharedPreferences on Android)
+   - Don't use localStorage (not available on native, web-only)
+
+c) Auth Flow Pattern:
+   - On app launch → check secure-store for tokens → validate with me()
+   - If valid → go to wallet dashboard
+   - If invalid/expired → try refresh → if fails → go to auth screens
+   - Auth store hydrates from secure-store on init
+
+d) Architecture Pattern:
+   - Follow arc-id's flow pattern for business logic (multi-step operations)
+   - Use Zustand for global state (matches arc-id)
+   - Use React Native's built-in or expo-secure-store for local persistence
+
+e) API Base URL:
+   - Default: http://localhost:4000/api/v1 (development)
+   - Configurable via env or app config for production
+
+6. DEPENDENCIES TO ADD (in order of priority)
+----------------------------------------------
+P0 - Required for auth:
+  zustand          ^5.x    (state management — matches arc-id)
+  expo-secure-store        (token persistence)
+
+P1 - Required for credentials:
+  expo-camera              (QR scanning for credential offers/presentations)
+  expo-haptics             (haptic feedback for interactions)
+
+P2 - Quality of life:
+  react-native-toast-message or expo-toast (notifications)
+  date-fns                  (date formatting — matches arc-id)
+
+7. ARC-ID BACKEND GAPS (blockers for wallet)
+----------------------------------------------
+- GET /credentials — returns 404, "list credentials" not implemented
+  → Wallet cannot fetch user's credential list yet
+  → Workaround: implement GET /credentials in arc-id
+
+- GET /identity/:id — returns 404
+  → Wallet cannot look up peer DIDs
+  → Workaround: not critical for MVP, wallet can resolve via DID document endpoint
+
+- No docker-compose.yml for local Postgres + Redis
+  → Must set up manually for local development
+
+8. FILE STRUCTURE TARGET (after implementation)
+-------------------------------------------------
+arc-wallet/
+├── src/
+│   ├── app/
+│   │   ├── _layout.tsx          # Root layout — ThemeProvider + AuthGuard + Router
+│   │   ├── (auth)/
+│   │   │   ├── _layout.tsx      # Auth screens layout (no tabs)
+│   │   │   ├── login.tsx
+│   │   │   ├── register.tsx
+│   │   │   ├── mfa-verify.tsx
+│   │   │   ├── passkey.tsx
+│   │   │   ├── forgot-password.tsx
+│   │   │   └── reset-password.tsx
+│   │   ├── (onboarding)/
+│   │   │   ├── _layout.tsx      # Stepper layout with progress dots
+│   │   │   ├── welcome.tsx
+│   │   │   ├── features.tsx
+│   │   │   ├── biometric.tsx
+│   │   │   ├── credential-intro.tsx
+│   │   │   └── complete.tsx
+│   │   └── (app)/
+│   │       ├── _layout.tsx      # App screens layout (with tabs)
+│   │       ├── index.tsx        # Wallet dashboard
+│   │       ├── credentials/     # Credential management
+│   │       ├── did/             # DID management
+│   │       └── settings/        # Profile settings, MFA, security
+│   ├── components/
+│   │   ├── ui/                  # Existing UI components
+│   │   ├── onboarding/          # Onboarding step renderers
+│   │   │   ├── step-card.tsx
+│   │   │   ├── progress-dots.tsx
+│   │   │   └── skip-button.tsx
+│   │   └── wallet/              # Wallet-specific components
+│   ├── constants/
+│   │   └── theme.ts             # Existing theme
+│   ├── hooks/
+│   │   ├── use-theme.ts         # Existing
+│   │   └── use-auth.ts          # NEW — auth hook wrapping store
+│   ├── services/
+│   │   ├── api-client.ts        # NEW — port arc-id SDK client
+│   │   ├── auth.ts              # NEW — port arc-id auth SDK
+│   │   ├── passkey.ts           # NEW — port arc-id passkey SDK
+│   │   ├── onboarding.ts        # NEW — ArcID onboarding API wrapper
+│   │   └── credentials.ts       # NEW — port arc-id credentials SDK
+│   ├── stores/
+│   │   ├── auth-store.ts        # NEW — port arc-id auth store
+│   │   └── onboarding-store.ts  # NEW — local onboarding state
+│   └── types/
+│       └── index.ts             # NEW — shared types
+├── assets/
+├── docs/
+│   └── integration-plan.md      # This document
+└── package.json
