@@ -1,0 +1,22 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "src/app/_layout.tsx",
+    "src/app/index.tsx",
+    "src/app/login.tsx",
+    "src/app/register.tsx",
+    "src/app/mfa.tsx",
+    "src/services/*.ts",
+    "src/stores/*.ts",
+    "src/sdk/*.ts",
+    "expo-env.d.ts"
+  ]
+}

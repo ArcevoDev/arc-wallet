@@ -1,98 +1,118 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
+import { useAuthStore } from '@/stores/auth-store';
+import { credentialService } from '@/services/credentials';
+import { authService } from '@/services/auth';
+import type { Credential } from '@arcevo/facet-sdk';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+export default function WalletHomeScreen() {
+  const router = useRouter();
+  const { user, accessToken, isAuthenticated } = useAuthStore();
+  const [credentials, setCredentials] = useState<Credential[] | null>(null);
+  const [loading, setLoading] = useState(false);
 
-export default function HomeScreen() {
+  const loadCredentials = useCallback(async () => {
+    if (!accessToken) return;
+    setLoading(true);
+    const result = await credentialService.list();
+    setLoading(false);
+    if (result.data) setCredentials(result.data);
+  }, [accessToken]);
+
+  useEffect(() => {
+    loadCredentials();
+  }, [loadCredentials]);
+
+  const handleLogout = async () => {
+    await authService.logout();
+    router.replace('/login');
+  };
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <ThemedView style={styles.header}>
+          <ThemedText type="title">ArcWallet</ThemedText>
+          <ThemedText themeColor="textSecondary">
+            {isAuthenticated && user ? `Signed in as ${user.name || user.email}` : 'Not signed in'}
           </ThemedText>
         </ThemedView>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle">Credentials</ThemedText>
+          {loading ? (
+            <ThemedText themeColor="textSecondary">Loading…</ThemedText>
+          ) : !credentials || credentials.length === 0 ? (
+            <ThemedText themeColor="textSecondary">
+              No credentials yet. Accept an offer from a trusted issuer to hold it here.
+            </ThemedText>
+          ) : (
+            credentials.map((c) => (
+              <ThemedView key={c.id} type="backgroundElement" style={styles.credentialCard}>
+                <ThemedText type="default" style={styles.credentialTitle}>{c.type}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Issued {c.issuedAt ? new Date(c.issuedAt).toLocaleDateString() : '—'}
+                  {c.expiresAt ? ` · expires ${new Date(c.expiresAt).toLocaleDateString()}` : ''}
+                </ThemedText>
+              </ThemedView>
+            ))
+          )}
         </ThemedView>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        {isAuthenticated && (
+          <Pressable
+            style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed]}
+            onPress={handleLogout}>
+            <ThemedText style={styles.logoutText}>Sign out</ThemedText>
+          </Pressable>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
   safeArea: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
+  container: {
+    padding: Spacing.four,
     gap: Spacing.four,
   },
-  title: {
-    textAlign: 'center',
+  header: {
+    alignItems: 'center',
+    gap: Spacing.one,
   },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
+  section: {
     gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  },
+  credentialCard: {
+    padding: Spacing.three,
+    borderRadius: Spacing.three,
+    gap: Spacing.one,
+  },
+  credentialTitle: {
+    fontWeight: '600',
+  },
+  logoutButton: {
+    marginTop: Spacing.four,
+    paddingVertical: Spacing.three,
+    alignItems: 'center',
+    borderRadius: Spacing.two,
+    borderWidth: 1,
+    borderColor: '#FF453A',
+  },
+  logoutText: {
+    color: '#FF453A',
+    fontWeight: '600',
+  },
+  pressed: {
+    opacity: 0.7,
   },
 });
