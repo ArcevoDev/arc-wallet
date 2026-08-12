@@ -1,10 +1,10 @@
 # ArcWallet
 
-Self-sovereign identity wallet for the ArcevoCirqle ecosystem. Built with Expo 57 + React Native 0.86, ArcWallet connects to the [ArcID](https://github.com/arcevodev/arc-id) identity and access management backend for decentralized identity, verifiable credentials, and secure authentication.
+Self-sovereign identity wallet for the ArcevoCirqle ecosystem. Built with Expo 57 + React Native 0.86, ArcWallet will connect to the [ArcID](https://github.com/arcevodev/arc-id) identity and access management backend for decentralized identity, verifiable credentials, and secure authentication.
 
-## Overview
+> **Status (2026-08-05): blank Expo starter.** The ArcID integration has not been built yet. This repo currently ships the default Expo tabs template (`index` / `explore`). The architecture below is the target; see [docs/arcwallet-integration-planning.md](./docs/arcwallet-integration-planning.md) for the phased plan and current facts.
 
-ArcWallet is a mobile-first wallet that lets users:
+## Vision
 
 - **Authenticate** — login, register, passkeys (WebAuthn), TOTP MFA, magic-link, social login
 - **Hold credentials** — receive, store, and display SD-JWT Verifiable Credentials issued by trusted parties
@@ -13,7 +13,7 @@ ArcWallet is a mobile-first wallet that lets users:
 - **Onboard seamlessly** — step-by-step setup flow powered by ArcID's built-in onboarding system (flow definitions + progress tracking on backend, wallet only renders the UI)
 - **Stay secure** — biometric auth, session management, step-up authentication for sensitive operations
 
-## Architecture
+## Architecture (target)
 
 ```
 ┌─────────────────┐     HTTP      ┌──────────────────────┐
@@ -23,7 +23,9 @@ ArcWallet is a mobile-first wallet that lets users:
 └─────────────────┘               └──────────────────────┘
 ```
 
-ArcWallet consumes ArcID's typed SDK — a pure TypeScript fetch client with automatic token refresh, covering auth, credentials, DIDs, tenants, and more. No framework dependencies, designed for portability.
+ArcWallet consumes **`@arcevo/facet-sdk`** — the published, framework-agnostic TypeScript fetch client that wraps the ArcID API. It covers auth, credentials (VCs), DIDs, onboarding, passkeys, tenants, billing, webhooks, audit, and IdP. The SDK is pure fetch (no DOM / no React), so it runs in React Native unchanged; only the token-storage adapter is swapped for `expo-secure-store`.
+
+**Important:** `@arcevo/facet-components` / `@arcevo/facet-auth` / `@arcevo/facet-layout` are **web-only** (Radix + DOM + Tailwind). They do **not** run in React Native. ArcWallet owns its native screens and uses the SDK for all server communication.
 
 ## Prerequisites
 
@@ -41,7 +43,7 @@ pnpm install
 pnpm start
 ```
 
-The wallet expects the ArcID API at `http://localhost:4000/api/v1` by default. Configure via `NEXT_PUBLIC_API_URL` environment variable for other environments.
+The wallet expects the ArcID API at `http://localhost:4000/api/v1` by default. Configure via `EXPO_PUBLIC_API_URL` environment variable for other environments.
 
 ## Scripts
 
@@ -58,17 +60,16 @@ The wallet expects the ArcID API at `http://localhost:4000/api/v1` by default. C
 ```
 src/
 ├── app/           # expo-router screens (file-based routing)
-│   ├── (auth)/       # Authentication screens (login, register, MFA, passkey)
-│   ├── (onboarding)/ # First-launch onboarding flow (welcome, features, setup)
-│   └── (app)/        # Wallet screens (dashboard, credentials, DID, settings)
+│   └── (currently: index / explore tabs — ArcID integration is next)
 ├── components/    # Reusable UI and wallet components
-├── services/      # ArcID SDK clients and business logic
-├── stores/        # Zustand state management
+├── services/      # ArcID SDK clients and business logic   (planned)
+├── stores/        # Zustand state management               (planned)
 ├── hooks/         # Custom React hooks
 ├── constants/     # Theme, spacing, configuration
-└── types/         # Shared TypeScript types
+└── types/         # Shared TypeScript types                (planned)
 ```
 
 ## Related
 
 - [ArcID](https://github.com/arcevodev/arc-id) — Sovereign identity & access management backend
+- [facet](https://github.com/arcevodev/facet) — Auth-first component system + `@arcevo/facet-sdk`

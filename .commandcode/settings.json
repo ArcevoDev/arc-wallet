@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(Get-ChildItem:*)",
+      "Shell(Select-Object:*)",
+      "Shell(Format-Table:*)",
+      "Shell(Where-Object:*)",
+      "Shell(dir:*)",
+      "Shell(for:*)",
+      "Shell(.agent*.txt:*)",
+      "Shell(do:*)",
+      "Shell(@findstr:*)",
+      "Shell(@echo:*)",
+      "Shell(dir ..\\arc-id /b 2>nul & echo EXITCODE:%errorlevel%)",
+      "Shell(npx tsc --version)",
+      "Shell(node -p \"require('./node_modules/typescript/package.json').version\")",
+      "Shell(node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json)",
+      "Shell(node node_modules/typescript/bin/tsc --version)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}
