@@ -9,6 +9,7 @@ import { Spacing } from '@/constants/theme';
 import { useAuthStore } from '@/stores/auth-store';
 import { credentialService } from '@/services/credentials';
 import { authService } from '@/services/auth';
+import { walletDidService } from '@/services/wallet-did';
 import type { Credential } from '@arcevo/facet-sdk';
 
 export default function WalletHomeScreen() {
@@ -28,6 +29,15 @@ export default function WalletHomeScreen() {
   useEffect(() => {
     loadCredentials();
   }, [loadCredentials]);
+
+  // First-launch DID registration: if signed in with no registered DID,
+  // route to /did so the wallet can present credentials.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    walletDidService.hasRegisteredDid().then((registered) => {
+      if (!registered) router.replace('/did');
+    });
+  }, [isAuthenticated, router]);
 
   const handleLogout = async () => {
     await authService.logout();

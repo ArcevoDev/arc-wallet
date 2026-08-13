@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { identity } from "@/sdk";
 import { useAuthStore } from "@/stores/auth-store";
-import type { JsonObject } from "@arcevo/facet-sdk";
+import { getDeviceDid, getPublicKeyJwk } from "@/services/presentation";
 
 const WALLET_KEY_STORAGE_KEY = "arcwallet-did";
 
@@ -10,8 +10,9 @@ const WALLET_KEY_STORAGE_KEY = "arcwallet-did";
  * launch (non-custodial: the private key never leaves the device).
  *
  * The SDK's registerWalletDid accepts a public key JWK + provider +
- * providerWalletId. The wallet generates a keypair and sends ONLY the
- * public JWK — ArcID never custodies the private key.
+ * providerWalletId. The wallet generates the keypair (see
+ * presentation.ts), derives the did:key, and sends ONLY the public JWK —
+ * ArcID never custodies the private key.
  */
 export const walletDidService = {
   /** True if this device already registered a DID with ArcID. */
@@ -20,18 +21,31 @@ export const walletDidService = {
     return stored !== null;
   },
 
+  /** The full did:key this device presents with. */
+  async getRegisteredDid(): Promise<string | null> {
+    const stored = await SecureStore.getItemAsync(WALLET_KEY_STORAGE_KEY);
+    if (!stored) return null;
+    try {
+      return JSON.parse(stored).did as string;
+    } catch {
+      return null;
+    }
+  },
+
   /**
-   * Register the wallet DID with ArcID. `publicKeyJwk` is the public half
-   * of the device keypair (Ed25519). Returns the stored public JWK.
+   * Register the wallet DID with ArcID. Generates/loads the device
+   * keypair, sends the public JWK, and remembers the resulting did:key.
    */
-  async register(publicKeyJwk: JsonObject): Promise<{ did?: string }> {
+  async register(): Promise<string> {
     if (!useAuthStore.getState().accessToken) {
       throw new Error("Not signed in — cannot register wallet DID");
     }
 
     const providerWalletId = await this.getOrCreateDeviceId();
+    const [publicKeyJwk, did] = await Promise.all([getPublicKeyJwk(), getDeviceDid()]);
+
     const result = await identity.registerWalletDid({
-      publicKeyJwk,
+      publicKeyJwk: publicKeyJwk as unknown as Parameters<typeof identity.registerWalletDid>[0]["publicKeyJwk"],
       provider: "arc-wallet",
       providerWalletId,
     });
@@ -41,9 +55,12 @@ export const walletDidService = {
     }
 
     // Remember the registration so we don't re-register every launch.
-    await SecureStore.setItemAsync(WALLET_KEY_STORAGE_KEY, JSON.stringify({ providerWalletId }));
+    await SecureStore.setItemAsync(
+      WALLET_KEY_STORAGE_KEY,
+      JSON.stringify({ providerWalletId, did }),
+    );
 
-    return { did: (result.data as { did?: string } | undefined)?.did };
+    return did;
   },
 
   /** Stable per-device id used as the wallet's provider id. */
