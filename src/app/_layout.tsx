@@ -21,7 +21,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     SplashScreenExpo.hideAsync();
 
     const inAuthGroup = segments[0] === 'login' || segments[0] === 'register' || segments[0] === 'mfa';
-    if (!isAuthenticated && !inAuthGroup) {
+    const isPublicRoute = inAuthGroup || segments[0] === 'offer';
+    if (!isAuthenticated && !isPublicRoute) {
       router.replace('/login');
     } else if (isAuthenticated && inAuthGroup) {
       router.replace('/');
@@ -53,6 +54,7 @@ export default function RootLayout() {
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="register" options={{ headerShown: false }} />
           <Stack.Screen name="mfa" options={{ headerShown: false }} />
+          <Stack.Screen name="offer" options={{ title: "Accept offer" }} />
         </Stack>
       </AuthGate>
     </ThemeProvider>

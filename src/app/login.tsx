@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -10,6 +10,7 @@ import { authService } from '@/services/auth';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { next } = useLocalSearchParams<{ next?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -32,11 +33,11 @@ export default function LoginScreen() {
 
     const data = result.data;
     if (data?.requiresMfa || data?.sessionId) {
-      router.replace(`/mfa?sessionId=${encodeURIComponent(data.sessionId)}`);
+      router.replace(`/mfa?sessionId=${encodeURIComponent(data.sessionId)}${next ? `&next=${encodeURIComponent(next)}` : ''}`);
       return;
     }
 
-    router.replace('/');
+    router.replace((next ?? '/') as Href);
   };
 
   return (
